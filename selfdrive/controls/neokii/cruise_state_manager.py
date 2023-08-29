@@ -1,11 +1,12 @@
+import capnp
 
+from typing import Dict
 from cereal import car
-from common.numpy_fast import clip
-from selfdrive.car import create_button_event
-from common.conversions import Conversions as CV
-from common.params import Params, put_nonblocking
-from selfdrive.car.hyundai.values import CANFD_CAR
-from selfdrive.controls.lib.drive_helpers import V_CRUISE_MAX, V_CRUISE_ENABLE_MIN
+from openpilot.common.numpy_fast import clip
+from openpilot.common.conversions import Conversions as CV
+from openpilot.common.params import Params, put_nonblocking
+from openpilot.selfdrive.car.hyundai.values import CANFD_CAR
+from openpilot.selfdrive.controls.lib.drive_helpers import V_CRUISE_MAX, V_CRUISE_ENABLE_MIN
 
 V_CRUISE_MIN_CRUISE_STATE = 10
 
@@ -13,9 +14,20 @@ V_CRUISE_DELTA_MI = 5 * CV.MPH_TO_KPH
 V_CRUISE_DELTA_KM = 10
 ButtonType = car.CarState.ButtonEvent.Type
 
-def is_radar_disabler(CP):
+def is_radar_point(CP):
   return (CP.openpilotLongitudinalControl and CP.carFingerprint in CANFD_CAR) or \
     (CP.openpilotLongitudinalControl and CP.sccBus == 0)
+
+def create_button_event(cur_but: int, prev_but: int, buttons_dict: Dict[int, capnp.lib.capnp._EnumModule],
+                        unpressed: int = 0) -> capnp.lib.capnp._DynamicStructBuilder:
+  if cur_but != unpressed:
+    be = car.CarState.ButtonEvent(pressed=True)
+    but = cur_but
+  else:
+    be = car.CarState.ButtonEvent(pressed=False)
+    but = prev_but
+  be.type = buttons_dict.get(but, ButtonType.unknown)
+  return be
 
 
 class CruiseStateManager:
@@ -57,7 +69,7 @@ class CruiseStateManager:
     self.cruise_state_control = Params().get_bool('CruiseStateControl')
 
   def is_resume_spam_allowed(self, CP):
-    if is_radar_disabler(CP):
+    if is_radar_point(CP):
       return False
     return not self.cruise_state_control
 
@@ -101,10 +113,9 @@ class CruiseStateManager:
       CS.cruiseState.standstill = False
       CS.cruiseState.speed = self.speed
       CS.cruiseState.gapAdjust = self.gapAdjust
-    
+
     if self.enabled : # 롱컨 시작
       CS.cruiseState.enabled = self.enabled
-
   def update_buttons(self):
     if self.button_events is None:
       return ButtonType.unknown
